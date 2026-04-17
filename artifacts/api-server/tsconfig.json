@@ -1,0 +1,156 @@
+import { Router, type IRouter } from "express";
+import { eq, sql } from "drizzle-orm";
+import { db, mixtapesTable, songsTable } from "@workspace/db";
+import {
+  CreateMixtapeBody,
+  GetMixtapeParams,
+  UpdateMixtapeParams,
+  UpdateMixtapeBody,
+  DeleteMixtapeParams,
+} from "@workspace/api-zod";
+import { requireAdmin } from "../middlewares/auth";
+
+const router: IRouter = Router();
+
+router.get("/mixtapes", async (req, res): Promise<void> => {
+  const mixtapes = await db
+    .select({
+      id: mixtapesTable.id,
+      title: mixtapesTable.title,
+      artist: mixtapesTable.artist,
+      genre: mixtapesTable.genre,
+      coverUrl: mixtapesTable.coverUrl,
+      description: mixtapesTable.description,
+      releaseYear: mixtapesTable.releaseYear,
+      createdAt: mixtapesTable.createdAt,
+      songCount: sql<number>`cast(count(${songsTable.id}) as int)`,
+      totalPlays: sql<number>`cast(coalesce(sum(${songsTable.totalPlays}), 0) as int)`,
+    })
+    .from(mixtapesTable)
+    .leftJoin(songsTable, eq(songsTable.mixtapeId, mixtapesTable.id))
+    .groupBy(mixtapesTable.id)
+    .orderBy(mixtapesTable.createdAt);
+  res.json(mixtapes);
+});
+
+router.post("/mixtapes", requireAdmin, async (req, res): Promise<void> => {
+  const parsed = CreateMixtapeBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+  const [mixtape] = await db.insert(mixtapesTable).values(parsed.data).returning();
+  const result = { ...mixtape, songCount: 0, totalPlays: 0 };
+  res.status(201).json(result);
+});
+
+router.get("/mixtapes/:id", async (req, res): Promise<void> => {
+  const params = GetMixtapeParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+  const [mixtape] = await db
+    .select({
+      id: mixtapesTable.id,
+      title: mixtapesTable.title,
+      artist: mixtapesTable.artist,
+      genre: mixtapesTable.genre,
+      coverUrl: mixtapesTable.coverUrl,
+      description: mixtapesTable.description,
+      releaseYear: mixtapesTable.releaseYear,
+      createdAt: mixtapesTable.createdAt,
+      songCount: sql<number>`cast(count(${songsTable.id}) as int)`,
+      totalPlays: sql<number>`cast(coalesce(sum(${songsTable.totalPlays}), 0) as int)`,
+    })
+    .from(mixtapesTable)
+    .leftJoin(songsTable, eq(songsTable.mixtapeId, mixtapesTable.id))
+    .where(eq(mixtapesTable.id, params.data.id))
+    .groupBy(mixtapesTable.id);
+
+  if (!mixtape) {
+    res.status(404).json({ error: "Mixtape not found" });
+    return;
+  }
+
+  const songs = await db
+    .select()
+    .from(songsTable)
+    .where(eq(songsTable.mixtapeId, params.data.id))
+    .orderBy(songsTable.trackNumber, songsTable.createdAt);
+
+  const songsWithMixtape = songs.map((s) => ({
+    ...s,
+    mixtapeTitle: mixtape.title,
+  }));
+
+  res.json({ ...mixtape, songs: songsWithMixtape });
+});
+
+router.patch("/mixtapes/:id", requireAdmin, async (req, res): Promise<void> => {
+  const params = UpdateMixtapeParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+  const parsed = UpdateMixtapeBody.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ error: parsed.error.message });
+    return;
+  }
+
+  const updateData: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(parsed.data)) {
+    if (v !== null && v !== undefined) updateData[k] = v;
+  }
+
+  const [updated] = await db
+    .update(mixtapesTable)
+    .set(updateData)
+    .where(eq(mixtapesTable.id, params.data.id))
+    .returning();
+
+  if (!updated) {
+    res.status(404).json({ error: "Mixtape not found" });
+    return;
+  }
+
+  const [withCount] = await db
+    .select({
+      id: mixtapesTable.id,
+      title: mixtapesTable.title,
+      artist: mixtapesTable.artist,
+      genre: mixtapesTable.genre,
+      coverUrl: mixtapesTable.coverUrl,
+      description: mixtapesTable.description,
+      releaseYear: mixtapesTable.releaseYear,
+      createdAt: mixtapesTable.createdAt,
+      songCount: sql<number>`cast(count(${songsTable.id}) as int)`,
+      totalPlays: sql<number>`cast(coalesce(sum(${songsTable.totalPlays}), 0) as int)`,
+    })
+    .from(mixtapesTable)
+    .leftJoin(songsTable, eq(songsTable.mixtapeId, mixtapesTable.id))
+    .where(eq(mixtapesTable.id, params.data.id))
+    .groupBy(mixtapesTable.id);
+
+  res.json(withCount);
+});
+
+router.delete("/mixtapes/:id", requireAdmin, async (req, res): Promise<void> => {
+  const params = DeleteMixtapeParams.safeParse(req.params);
+  if (!params.success) {
+    res.status(400).json({ error: params.error.message });
+    return;
+  }
+  const [deleted] = await db
+    .delete(mixtapesTable)
+    .where(eq(mixtapesTable.id, params.data.id))
+    .returning();
+  if (!deleted) {
+    res.status(404).json({ error: "Mixtape not found" });
+    return;
+  }
+  res.sendStatus(204);
+});
+
+export default router;

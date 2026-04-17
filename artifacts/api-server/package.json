@@ -1,0 +1,22 @@
+import { Router, type IRouter } from "express";
+import healthRouter from "./health";
+import mixtapesRouter from "./mixtapes";
+import songsRouter from "./songs";
+import playsRouter from "./plays";
+import commentsRouter from "./comments";
+import analyticsRouter from "./analytics";
+import adminRouter from "./admin";
+import uploadRouter from "./upload";
+
+const router: IRouter = Router();
+
+router.use(healthRouter);
+router.use(mixtapesRouter);
+router.use(songsRouter);
+router.use(playsRouter);
+router.use(commentsRouter);
+router.use(analyticsRouter);
+router.use(adminRouter);
+router.use(uploadRouter);
+
+export default router;
